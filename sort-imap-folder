@@ -1,0 +1,88 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw( say );
+use Encode qw( decode_utf8 encode );
+use Getopt::Long qw( GetOptions );
+use Mail::IMAPClient;
+
+my ( $server, $port, $user, $password, $folder );
+GetOptions( 'server=s'   => \$server,
+            'port=i'     => \$port,
+            'user=s'     => \$user,
+            'password=s' => \$password,
+            'folder=s'   => \$folder );
+
+#
+# エラーチェック
+#
+
+unless ( defined $server and defined $port and defined $user and defined $password and defined $folder ) {
+  say STDERR 'options must be specified';
+  exit -1;
+}
+
+#
+# フォルダ名を生成
+#
+
+my $org_folder = decode_utf8( $folder );
+my $src_folder = encode( 'IMAP-UTF-7', $org_folder );
+my $dst_folder = encode( 'IMAP-UTF-7', $org_folder . '_tmp' );
+
+#
+# サーバへ接続
+#
+
+my $imap = Mail::IMAPClient->new( Server   => $server,
+                                  User     => $user,
+                                  Password => $password,
+                                  Port     => $port,
+                                  Ssl      => 1,
+                                  Uid      => 1 )
+  or die "Could not connect to server: $@\n";
+
+#
+# コピー先となるフォルダを作成
+#
+
+unless ( $imap->exists( $src_folder ) ) {
+  die "$src_folder does not exist: $@\n";
+}
+if ( $imap->exists( $dst_folder ) ) {
+  die "$dst_folder already exists: $@\n";
+}
+$imap->create( $dst_folder )
+  or die "Could not create $dst_folder: $@\n";
+
+#
+# UIDを日付でソートして取得
+#
+
+$imap->select( $src_folder )
+  or die "Could not select $src_folder: $@\n";
+my @msgs = $imap->sort( 'DATE', 'UTF-8', 'ALL' );
+
+#
+# メッセージをコピー
+#
+
+foreach my $msg ( @msgs ) {
+  say STDERR $msg;
+  $imap->copy( $dst_folder, $msg )
+    or die "Could not copy to $dst_folder: $@\n";
+}
+
+#
+# サーバから切断
+#
+
+$imap->disconnect
+  or die "Could not disconnect from server: $@\n";
+
+#
+# 終了
+#
+
+exit 0;
